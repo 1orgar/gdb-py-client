@@ -91,8 +91,21 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-      - name: Publish package distributions to PyPI
+      - name: Publish package distributions to PyPI (API Token)
+        if: env.PYPI_API_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+          repository-url: ${{ inputs.pypi_target == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Publish package distributions to PyPI (Trusted Publishing OIDC)
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
           repository-url: ${{ inputs.pypi_target == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
