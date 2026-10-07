@@ -4,13 +4,41 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gdb-client"
-version = "0.2.0"
-description = "High-performance Python client for GDB with Polars-powered parallel scatter-ingest via Arrow Flight"
+version = "0.3.0"
+description = "High-performance Python client for GDB graph database with Polars parallel scatter-ingest via Apache Arrow Flight"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
 authors = [
-    { name = "GDB Team" }
+    { name = "GDB Team", email = "dev@gdb.io" }
+]
+keywords = [
+    "graph-database",
+    "gdb",
+    "apache-arrow",
+    "arrow-flight",
+    "polars",
+    "cypher",
+    "opencypher",
+    "scatter-ingest",
+    "htap",
+    "mpp",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Operating System :: OS Independent",
 ]
 dependencies = [
     "polars>=1.0.0",
@@ -21,7 +49,23 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/1orgar/gdb"
+Repository = "https://github.com/1orgar/gdb-py-client"
+Documentation = "https://github.com/1orgar/gdb/blob/main/docs/SERVER_AND_QUERY_GUIDE.md"
+Issues = "https://github.com/1orgar/gdb-py-client/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gdb_client"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/pyproject.toml",
+]
