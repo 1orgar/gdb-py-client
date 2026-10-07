@@ -187,26 +187,6 @@ Built artifacts will be located in `dist/`:
 - `dist/gdb_client-0.3.0-py3-none-any.whl`
 - `dist/gdb_client-0.3.0.tar.gz`
 
----
-
-## 🚀 Publishing to PyPI
-
-This project is configured with GitHub Actions for automated building and publishing:
-
-1. **Automated CI (`.github/workflows/ci.yml`)**:
-   Runs tests and verifies wheel builds on Python 3.9, 3.10, 3.11, 3.12, and 3.13 on every push and PR.
-
-2. **Automated PyPI Release (`.github/workflows/publish.yml`)**:
-   Triggered on git tags matching `v*` (e.g., `v0.3.0`) or manually via GitHub Actions `workflow_dispatch`.
-   - Builds distribution wheels and source archives.
-   - Creates a GitHub Release with assets attached.
-   - Publishes to PyPI using [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC token authentication, no hardcoded API tokens required).
-
-To release a new version manually using `twine`:
-
-```bash
-twine upload dist/*
-```
 
 ---
 
