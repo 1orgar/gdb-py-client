@@ -57,6 +57,8 @@ class QueryResult:
                 self.columns = list(self._arrow_table.column_names)
             if not self.num_rows:
                 self.num_rows = self._arrow_table.num_rows
+            if not self.rows and self.num_rows > 0:
+                self.rows = [list(r.values()) for r in self._arrow_table.to_pylist()]
 
     @property
     def is_ok(self) -> bool:
@@ -265,7 +267,9 @@ class GdbClient:
             writer.write_table(arrow_table)
             writer.close()
 
-            for _ in reader:
+            try:
+                reader.read()
+            except Exception:
                 pass
 
             return len(sub_df)
@@ -335,7 +339,9 @@ class GdbClient:
             writer.write_table(arrow_table)
             writer.close()
 
-            for _ in reader:
+            try:
+                reader.read()
+            except Exception:
                 pass
 
             return len(sub_df)
