@@ -431,6 +431,10 @@ class GdbClient:
         """Executes query and returns results directly as a Polars DataFrame."""
         return self.query(cypher, as_df=True, use_flight=use_flight)
 
+    def query_graph(self, cypher: str) -> nx.DiGraph:
+        """Executes query and returns results directly as a NetworkX DiGraph."""
+        return self.query(cypher).to_networkx()
+
     def execute(self, stmt: str) -> QueryResult:
         """Alias for query()."""
         return self.query(stmt)
