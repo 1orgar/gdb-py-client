@@ -3,5 +3,5 @@
 from .client import GdbClient, QueryResult
 from .topology import ClusterTopology, NodeInfo
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 __all__ = ["GdbClient", "QueryResult", "ClusterTopology", "NodeInfo"]

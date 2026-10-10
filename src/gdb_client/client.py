@@ -186,6 +186,16 @@ class GdbClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+    def _create_flight_client(self, location: str) -> flight.FlightClient:
+        opts = [
+            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
+            ("grpc.max_send_message_length", 256 * 1024 * 1024),
+        ]
+        try:
+            return flight.FlightClient(location, generic_options=opts)
+        except TypeError:
+            return flight.FlightClient(location)
+
     def _connect_flight_clients(self):
         if flight is None:
             return
@@ -193,7 +203,7 @@ class GdbClient:
         for node in self.topology.nodes:
             location = f"grpc://{node.host}:{node.client_flight_port}"
             try:
-                client = flight.FlightClient(location)
+                client = self._create_flight_client(location)
                 self._flight_clients[node.node_id] = client
             except Exception:
                 pass
@@ -204,7 +214,7 @@ class GdbClient:
                 parsed = urllib.parse.urlparse(self.endpoint)
                 host = parsed.hostname or "127.0.0.1"
                 location = f"grpc://{host}:{self.client_flight_port}"
-                client = flight.FlightClient(location)
+                client = self._create_flight_client(location)
                 self._flight_clients[1] = client
             except Exception:
                 pass
@@ -255,7 +265,7 @@ class GdbClient:
             target_node = self.topology.nodes[part_idx % total_nodes]
             client = self._flight_clients.get(target_node.node_id)
             if client is None:
-                client = flight.FlightClient(f"grpc://{target_node.host}:{target_node.client_flight_port}")
+                client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
 
             clean_df = sub_df.drop("_partition")
             arrow_table = clean_df.to_arrow()
@@ -264,7 +274,10 @@ class GdbClient:
             descriptor = flight.FlightDescriptor.for_command(descriptor_cmd.encode("utf-8"))
 
             writer, reader = client.do_put(descriptor, arrow_table.schema)
-            writer.write_table(arrow_table)
+            try:
+                writer.write_table(arrow_table, max_chunksize=65536)
+            except TypeError:
+                writer.write_table(arrow_table)
             writer.close()
 
             try:
@@ -327,7 +340,7 @@ class GdbClient:
             target_node = self.topology.nodes[part_idx % total_nodes]
             client = self._flight_clients.get(target_node.node_id)
             if client is None:
-                client = flight.FlightClient(f"grpc://{target_node.host}:{target_node.client_flight_port}")
+                client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
 
             clean_df = sub_df.drop("_partition")
             arrow_table = clean_df.to_arrow()
@@ -336,7 +349,10 @@ class GdbClient:
             descriptor = flight.FlightDescriptor.for_command(descriptor_cmd.encode("utf-8"))
 
             writer, reader = client.do_put(descriptor, arrow_table.schema)
-            writer.write_table(arrow_table)
+            try:
+                writer.write_table(arrow_table, max_chunksize=65536)
+            except TypeError:
+                writer.write_table(arrow_table)
             writer.close()
 
             try:
