@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gdb-client"
-version = "0.3.0"
-description = "High-performance Python client for GDB graph database with Polars parallel scatter-ingest via Apache Arrow Flight"
+version = "0.5.1"
+description = "Official Python SDK & Arrow Flight Client for GDB (Distributed In-Memory Graph Database)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
@@ -23,6 +23,8 @@ keywords = [
     "scatter-ingest",
     "htap",
     "mpp",
+    "networkx",
+    "vector-search",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -41,13 +43,25 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "polars>=1.0.0",
-    "pyarrow>=14.0.0",
     "requests>=2.28.0",
+    "pyarrow>=14.0.0",
+    "polars>=0.20.0",
 ]
 
 [project.optional-dependencies]
+all = [
+    "networkx>=3.0",
+    "pandas>=1.5.0",
+    "numpy>=1.24.0",
+]
+analytics = [
+    "networkx>=3.0",
+    "pandas>=1.5.0",
+    "numpy>=1.24.0",
+]
 dev = [
+    "networkx>=3.0",
+    "pandas>=1.5.0",
     "pytest>=7.0.0",
     "build>=1.0.0",
     "twine>=5.0.0",
