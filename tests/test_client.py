@@ -189,6 +189,38 @@ class TestTopologyAndRouting(unittest.TestCase):
         target_3 = topology.target_node_for_key(3)
         self.assertEqual(target_3.node_id, 1)
 
+    def test_node_info_address_resolution(self):
+        # 1. Explicit remote client_flight_address
+        node = NodeInfo.from_dict({
+            "node_id": 1,
+            "http_url": "http://10.0.0.1:8847",
+            "flight_address": "10.0.0.1",
+            "flight_port": 8848,
+            "client_flight_address": "mpp.gdb.cluster.internal",
+            "client_flight_port": 8860,
+        })
+        self.assertEqual(node.host, "mpp.gdb.cluster.internal")
+        self.assertEqual(node.flight_address, "10.0.0.1")
+        self.assertEqual(node.client_flight_address, "mpp.gdb.cluster.internal")
+
+        # 2. Server returned loopback inside Docker, but client connected via remote seed_host
+        node_docker = NodeInfo.from_dict({
+            "node_id": 1,
+            "http_url": "http://127.0.0.1:8847",
+            "flight_address": "127.0.0.1",
+            "flight_port": 8848,
+            "client_flight_address": "127.0.0.1",
+            "client_flight_port": 8860,
+        }, seed_host="192.168.1.100")
+        self.assertEqual(node_docker.host, "192.168.1.100")
+
+        # 3. Default fallback from http_url
+        node_default = NodeInfo.from_dict({
+            "node_id": 2,
+            "http_url": "http://10.0.0.2:8847",
+        })
+        self.assertEqual(node_default.host, "10.0.0.2")
+
     @unittest.skipUnless(HAS_POLARS, "polars is required for this test")
     def test_polars_partitioning_logic(self):
         df = pl.DataFrame({
