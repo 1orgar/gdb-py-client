@@ -236,12 +236,31 @@ class GdbClient:
         label: str = "User",
         id_col: str = "id",
         max_workers: int = 8,
+        validate_schema: bool = True,
     ) -> Dict[str, Union[int, float]]:
         """Partitions vertex DataFrame in parallel using Polars expressions,
         and streams each partition directly to the primary replica node via Arrow Flight.
         """
         if pl is None or flight is None:
             raise ImportError("polars and pyarrow are required for scatter_ingest_vertices")
+
+        if validate_schema:
+            schema_info = self.schema()
+            vertices = schema_info.get("vertices", [])
+            known_labels = set()
+            for v in vertices:
+                if isinstance(v, dict):
+                    lbl = v.get("label") or v.get("name")
+                    if lbl:
+                        known_labels.add(lbl)
+                elif isinstance(v, str):
+                    known_labels.add(v)
+            if label not in known_labels:
+                raise ValueError(
+                    f"Vertex label '{label}' does not exist in graph schema. "
+                    f"Available labels: {sorted(list(known_labels))}. "
+                    f"Create it first using CREATE VERTEX {label} (...);"
+                )
 
         start_time = time.perf_counter()
         total_nodes = self.topology.total_nodes
@@ -268,6 +287,8 @@ class GdbClient:
                 client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
 
             clean_df = sub_df.drop("_partition")
+            if id_col != "id" and id_col in clean_df.columns:
+                clean_df = clean_df.rename({id_col: "id"})
             arrow_table = clean_df.to_arrow()
 
             descriptor_cmd = json.dumps({"type": "vertex", "label": label})
@@ -313,12 +334,31 @@ class GdbClient:
         dst_col: str = "dst",
         rank_col: Optional[str] = None,
         max_workers: int = 8,
+        validate_schema: bool = True,
     ) -> Dict[str, Union[int, float]]:
         """Partitions edge DataFrame by source vertex ID in parallel using Polars,
         and streams directly to primary replica nodes via Arrow Flight.
         """
         if pl is None or flight is None:
             raise ImportError("polars and pyarrow are required for scatter_ingest_edges")
+
+        if validate_schema:
+            schema_info = self.schema()
+            edges = schema_info.get("edges", [])
+            known_types = set()
+            for e in edges:
+                if isinstance(e, dict):
+                    et = e.get("edge_type_name") or e.get("edge_type") or e.get("name")
+                    if isinstance(et, str):
+                        known_types.add(et)
+                elif isinstance(e, str):
+                    known_types.add(e)
+            if edge_type not in known_types:
+                raise ValueError(
+                    f"Edge type '{edge_type}' does not exist in graph schema. "
+                    f"Available edge types: {sorted(list(known_types))}. "
+                    f"Create it first using CREATE EDGE {edge_type} (...);"
+                )
 
         start_time = time.perf_counter()
         total_nodes = self.topology.total_nodes
@@ -343,6 +383,15 @@ class GdbClient:
                 client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
 
             clean_df = sub_df.drop("_partition")
+            rename_map = {}
+            if src_col != "src" and src_col in clean_df.columns:
+                rename_map[src_col] = "src"
+            if dst_col != "dst" and dst_col in clean_df.columns:
+                rename_map[dst_col] = "dst"
+            if rank_col and rank_col != "rank" and rank_col in clean_df.columns:
+                rename_map[rank_col] = "rank"
+            if rename_map:
+                clean_df = clean_df.rename(rename_map)
             arrow_table = clean_df.to_arrow()
 
             descriptor_cmd = json.dumps({"type": "edge", "edge_type": edge_type})

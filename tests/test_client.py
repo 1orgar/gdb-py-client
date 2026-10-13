@@ -234,6 +234,36 @@ class TestTopologyAndRouting(unittest.TestCase):
         self.assertEqual(len(partitions), 3)
         self.assertEqual(sum(len(sub) for sub in partitions.values()), 6)
 
+    @unittest.skipUnless(HAS_POLARS, "polars is required for this test")
+    def test_scatter_ingest_schema_validation_unknown_label(self):
+        with patch.object(ClusterTopology, "refresh"):
+            client = GdbClient()
+            client.schema = MagicMock(return_value={
+                "status": "ok",
+                "vertices": [{"label": "User"}],
+                "edges": [{"edge_type_name": "KNOWS"}],
+            })
+            df = pl.DataFrame({"id": [1, 2], "name": ["A", "B"]})
+            with self.assertRaises(ValueError) as ctx:
+                client.scatter_ingest_vertices(df, label="Post")
+            self.assertIn("Vertex label 'Post' does not exist in graph schema", str(ctx.exception))
+            self.assertIn("User", str(ctx.exception))
+
+    @unittest.skipUnless(HAS_POLARS, "polars is required for this test")
+    def test_scatter_ingest_schema_validation_unknown_edge(self):
+        with patch.object(ClusterTopology, "refresh"):
+            client = GdbClient()
+            client.schema = MagicMock(return_value={
+                "status": "ok",
+                "vertices": [{"label": "User"}],
+                "edges": [{"edge_type_name": "KNOWS"}],
+            })
+            df = pl.DataFrame({"src": [1, 2], "dst": [3, 4]})
+            with self.assertRaises(ValueError) as ctx:
+                client.scatter_ingest_edges(df, edge_type="LIKES")
+            self.assertIn("Edge type 'LIKES' does not exist in graph schema", str(ctx.exception))
+            self.assertIn("KNOWS", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
