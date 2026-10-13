@@ -278,13 +278,11 @@ class GdbClient:
 
         # 2. Dispatch partitions to target nodes concurrently
         total_rows = 0
+        rf = max(1, min(self.topology.replication_factor, total_nodes))
 
         def _send_partition(part_idx_tuple, sub_df: pl.DataFrame) -> int:
             part_idx = part_idx_tuple[0] if isinstance(part_idx_tuple, tuple) else part_idx_tuple
-            target_node = self.topology.nodes[part_idx % total_nodes]
-            client = self._flight_clients.get(target_node.node_id)
-            if client is None:
-                client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
+            replica_indices = [(part_idx + r) % total_nodes for r in range(rf)]
 
             clean_df = sub_df.drop("_partition")
             if id_col != "id" and id_col in clean_df.columns:
@@ -294,17 +292,23 @@ class GdbClient:
             descriptor_cmd = json.dumps({"type": "vertex", "label": label})
             descriptor = flight.FlightDescriptor.for_command(descriptor_cmd.encode("utf-8"))
 
-            writer, reader = client.do_put(descriptor, arrow_table.schema)
-            try:
-                writer.write_table(arrow_table, max_chunksize=65536)
-            except TypeError:
-                writer.write_table(arrow_table)
-            writer.close()
+            for rep_idx in replica_indices:
+                target_node = self.topology.nodes[rep_idx]
+                client = self._flight_clients.get(target_node.node_id)
+                if client is None:
+                    client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
 
-            try:
-                reader.read()
-            except Exception:
-                pass
+                writer, reader = client.do_put(descriptor, arrow_table.schema)
+                try:
+                    writer.write_table(arrow_table, max_chunksize=65536)
+                except TypeError:
+                    writer.write_table(arrow_table)
+                writer.close()
+
+                try:
+                    reader.read()
+                except Exception:
+                    pass
 
             return len(sub_df)
 
@@ -374,13 +378,11 @@ class GdbClient:
         partitions = partitioned_df.partition_by("_partition", as_dict=True)
 
         total_rows = 0
+        rf = max(1, min(self.topology.replication_factor, total_nodes))
 
         def _send_edge_partition(part_idx_tuple, sub_df: pl.DataFrame) -> int:
             part_idx = part_idx_tuple[0] if isinstance(part_idx_tuple, tuple) else part_idx_tuple
-            target_node = self.topology.nodes[part_idx % total_nodes]
-            client = self._flight_clients.get(target_node.node_id)
-            if client is None:
-                client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
+            replica_indices = [(part_idx + r) % total_nodes for r in range(rf)]
 
             clean_df = sub_df.drop("_partition")
             rename_map = {}
@@ -397,17 +399,23 @@ class GdbClient:
             descriptor_cmd = json.dumps({"type": "edge", "edge_type": edge_type})
             descriptor = flight.FlightDescriptor.for_command(descriptor_cmd.encode("utf-8"))
 
-            writer, reader = client.do_put(descriptor, arrow_table.schema)
-            try:
-                writer.write_table(arrow_table, max_chunksize=65536)
-            except TypeError:
-                writer.write_table(arrow_table)
-            writer.close()
+            for rep_idx in replica_indices:
+                target_node = self.topology.nodes[rep_idx]
+                client = self._flight_clients.get(target_node.node_id)
+                if client is None:
+                    client = self._create_flight_client(f"grpc://{target_node.host}:{target_node.client_flight_port}")
 
-            try:
-                reader.read()
-            except Exception:
-                pass
+                writer, reader = client.do_put(descriptor, arrow_table.schema)
+                try:
+                    writer.write_table(arrow_table, max_chunksize=65536)
+                except TypeError:
+                    writer.write_table(arrow_table)
+                writer.close()
+
+                try:
+                    reader.read()
+                except Exception:
+                    pass
 
             return len(sub_df)
 

@@ -80,7 +80,7 @@ class ClusterTopology:
                 resp.raise_for_status()
                 data = resp.json()
             else:
-                req = urllib.request.Request(url, headers={"User-Agent": "gdb-client/0.5.4"})
+                req = urllib.request.Request(url, headers={"User-Agent": "gdb-client/0.5.6"})
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
             raw_nodes = data.get("ring_nodes", [])
@@ -120,3 +120,10 @@ class ClusterTopology:
     def target_node_for_key(self, key: int) -> NodeInfo:
         idx = key % len(self.nodes)
         return self.nodes[idx]
+
+    def target_replica_nodes_for_key(self, key: int) -> List[NodeInfo]:
+        if not self.nodes:
+            return []
+        rf = max(1, min(self.replication_factor, len(self.nodes)))
+        start_idx = key % len(self.nodes)
+        return [self.nodes[(start_idx + r) % len(self.nodes)] for r in range(rf)]

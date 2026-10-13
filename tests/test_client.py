@@ -264,6 +264,75 @@ class TestTopologyAndRouting(unittest.TestCase):
             self.assertIn("Edge type 'LIKES' does not exist in graph schema", str(ctx.exception))
             self.assertIn("KNOWS", str(ctx.exception))
 
+    def test_target_replica_nodes_for_key(self):
+        topo = ClusterTopology.__new__(ClusterTopology)
+        topo.nodes = [
+            NodeInfo(node_id=1, http_url="http://node1:8847", flight_port=8848, client_flight_port=8860),
+            NodeInfo(node_id=2, http_url="http://node2:8847", flight_port=8848, client_flight_port=8860),
+            NodeInfo(node_id=3, http_url="http://node3:8847", flight_port=8848, client_flight_port=8860),
+        ]
+        # RF = 1 (pure sharding)
+        topo.replication_factor = 1
+        reps_rf1 = topo.target_replica_nodes_for_key(0)
+        self.assertEqual(len(reps_rf1), 1)
+        self.assertEqual(reps_rf1[0].node_id, 1)
+
+        reps_rf1_key4 = topo.target_replica_nodes_for_key(4)
+        self.assertEqual(len(reps_rf1_key4), 1)
+        self.assertEqual(reps_rf1_key4[0].node_id, 2)  # 4 % 3 = 1 -> node_id 2
+
+        # RF = 2
+        topo.replication_factor = 2
+        reps_rf2 = topo.target_replica_nodes_for_key(1)
+        self.assertEqual(len(reps_rf2), 2)
+        self.assertEqual([n.node_id for n in reps_rf2], [2, 3])
+
+        # RF = 3 (full replication)
+        topo.replication_factor = 3
+        reps_rf3 = topo.target_replica_nodes_for_key(2)
+        self.assertEqual(len(reps_rf3), 3)
+        self.assertEqual([n.node_id for n in reps_rf3], [3, 1, 2])
+
+    @unittest.skipUnless(HAS_POLARS, "polars is required for this test")
+    def test_scatter_ingest_edges_rf1_and_rf2(self):
+        with patch.object(ClusterTopology, "refresh"):
+            client = GdbClient()
+            client.topology.nodes = [
+                NodeInfo(node_id=1, http_url="http://node1:8847", flight_port=8848, client_flight_port=8860),
+                NodeInfo(node_id=2, http_url="http://node2:8847", flight_port=8848, client_flight_port=8860),
+            ]
+            client.schema = MagicMock(return_value={
+                "status": "ok",
+                "edges": [{"edge_type_name": "CONNECTED"}],
+            })
+
+            mock_flight_1 = MagicMock()
+            mock_flight_2 = MagicMock()
+            mock_flight_1.do_put.return_value = (MagicMock(), MagicMock())
+            mock_flight_2.do_put.return_value = (MagicMock(), MagicMock())
+            client._flight_clients = {1: mock_flight_1, 2: mock_flight_2}
+
+            # 1. Test RF=1 (Pure sharding: 0% duplication)
+            client.topology.replication_factor = 1
+            df = pl.DataFrame({"src": [1, 2], "dst": [2, 3]})
+            res1 = client.scatter_ingest_edges(df, edge_type="CONNECTED")
+            self.assertEqual(res1["rows_ingested"], 2)
+            # Each partition sent to exactly 1 node (total 2 do_put calls across 2 nodes)
+            total_calls_rf1 = mock_flight_1.do_put.call_count + mock_flight_2.do_put.call_count
+            self.assertEqual(total_calls_rf1, 2)
+
+            mock_flight_1.reset_mock()
+            mock_flight_2.reset_mock()
+
+            # 2. Test RF=2 (Replicated: sent to both nodes)
+            client.topology.replication_factor = 2
+            res2 = client.scatter_ingest_edges(df, edge_type="CONNECTED")
+            self.assertEqual(res2["rows_ingested"], 2)
+            total_calls_rf2 = mock_flight_1.do_put.call_count + mock_flight_2.do_put.call_count
+            # 2 partitions * 2 replicas = 4 do_put calls
+            self.assertEqual(total_calls_rf2, 4)
+
 
 if __name__ == "__main__":
     unittest.main()
+
