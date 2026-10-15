@@ -80,7 +80,7 @@ class ClusterTopology:
                 resp.raise_for_status()
                 data = resp.json()
             else:
-                req = urllib.request.Request(url, headers={"User-Agent": "gdb-client/0.5.6"})
+                req = urllib.request.Request(url, headers={"User-Agent": "gdb-client/0.5.7"})
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
             raw_nodes = data.get("ring_nodes", [])
