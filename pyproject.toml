@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gdb-client"
-version = "0.5.7"
-description = "Official Python SDK & Arrow Flight Client for GDB (Distributed In-Memory Graph Database)"
+version = "0.6.0"
+description = "Official Python SDK, Arrow Flight Client & LangChain/LangGraph Integrations for GDB v0.6.0 (Hals)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"

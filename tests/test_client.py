@@ -1,6 +1,16 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from gdb_client import GdbClient, QueryResult
+from gdb_client import (
+    CheckpointTuple,
+    Document,
+    GdbCheckpointSaver,
+    GdbClient,
+    GdbGraphQAChain,
+    GdbGraphRAGToolkit,
+    GdbGraphStore,
+    GdbVectorStore,
+    QueryResult,
+)
 from gdb_client.topology import ClusterTopology, NodeInfo
 
 try:
@@ -331,6 +341,130 @@ class TestTopologyAndRouting(unittest.TestCase):
             total_calls_rf2 = mock_flight_1.do_put.call_count + mock_flight_2.do_put.call_count
             # 2 partitions * 2 replicas = 4 do_put calls
             self.assertEqual(total_calls_rf2, 4)
+
+
+class TestGraphSpacesAndAiIntegrations(unittest.TestCase):
+    def test_graph_space_lifecycle_methods(self):
+        with patch.object(ClusterTopology, "refresh"):
+            client = GdbClient(endpoint="http://127.0.0.1:8847", graph="fraud_space")
+            self.assertEqual(client.graph, "fraud_space")
+
+            client.query = MagicMock(
+                side_effect=lambda q: QueryResult({"status": "ok", "active_graph": client.graph})
+            )
+            client.create_graph("analytics_space")
+            client.query.assert_called_with("CREATE GRAPH IF NOT EXISTS analytics_space;")
+
+            active = client.use_graph("analytics_space")
+            self.assertEqual(active, "analytics_space")
+            self.assertEqual(client.graph, "analytics_space")
+            client.query.assert_called_with("USE GRAPH analytics_space;")
+
+            client.drop_graph("analytics_space")
+            self.assertEqual(client.graph, "default")
+            client.query.assert_called_with("DROP GRAPH IF EXISTS analytics_space;")
+
+    def test_langchain_gdb_vector_store_and_graph_qa(self):
+        with patch.object(ClusterTopology, "refresh"):
+            client = GdbClient(graph="rag_space")
+            client.schema = MagicMock(return_value={"vertices": [], "edges": []})
+            executed_queries = []
+
+            def fake_query(q):
+                executed_queries.append(q)
+                if q.startswith("CALL vector.similaritySearch"):
+                    return QueryResult(
+                        {
+                            "status": "ok",
+                            "columns": ["vertex_id", "score"],
+                            "rows": [[101, 0.98], [102, 0.87]],
+                        }
+                    )
+                if "MATCH (n:Document {id: 101})" in q:
+                    return QueryResult(
+                        {
+                            "status": "ok",
+                            "columns": ["n.text", "n.metadata"],
+                            "rows": [["GDB supports native HNSW indexing", '{"topic": "hnsw"}']],
+                        }
+                    )
+                if "MATCH (n:Document {id: 102})" in q:
+                    return QueryResult(
+                        {
+                            "status": "ok",
+                            "columns": ["n.text", "n.metadata"],
+                            "rows": [["GDB supports Pregel BSP analytics", '{"topic": "pregel"}']],
+                        }
+                    )
+                if "MATCH (a {id: 101})-[:RELATES_TO]->(b)" in q:
+                    return QueryResult(
+                        {
+                            "status": "ok",
+                            "columns": ["src", "dst"],
+                            "rows": [[101, 102]],
+                        }
+                    )
+                return QueryResult({"status": "ok", "columns": [], "rows": []})
+
+            client.query = MagicMock(side_effect=fake_query)
+
+            store = GdbVectorStore(
+                client=client,
+                embedding=lambda txt: [0.5, 0.5, 0.5, 0.5],
+                dimension=4,
+            )
+            self.assertTrue(any("CREATE VECTOR INDEX ON Document(embedding);" in q for q in executed_queries))
+
+            ids = store.add_texts(
+                ["GDB supports native HNSW indexing", "GDB supports Pregel BSP analytics"],
+                metadatas=[{"topic": "hnsw"}, {"topic": "pregel"}],
+                ids=[101, 102],
+            )
+            self.assertEqual(ids, [101, 102])
+
+            docs = store.similarity_search("HNSW vector search", k=2)
+            self.assertEqual(len(docs), 2)
+            self.assertEqual(docs[0].page_content, "GDB supports native HNSW indexing")
+            self.assertEqual(docs[0].metadata["topic"], "hnsw")
+
+            graph_store = GdbGraphStore(client)
+            qa_chain = GdbGraphQAChain(
+                graph_store=graph_store,
+                vector_store=store,
+                llm=lambda prompt: f"Synthesized answer from {len(prompt)} chars",
+            )
+            out = qa_chain.invoke("How does GDB execute vector search?", k=2)
+            self.assertIn("Synthesized answer", out["answer"])
+            self.assertEqual(len(out["documents"]), 2)
+            self.assertEqual(out["graph_context"], [{"src": 101, "dst": 102}])
+
+    def test_langgraph_gdb_checkpoint_saver_and_graphrag_toolkit(self):
+        with patch.object(ClusterTopology, "refresh"):
+            client = GdbClient(graph="agent_memory")
+            client.schema = MagicMock(return_value={"vertices": [], "edges": []})
+            client.query = MagicMock(return_value=QueryResult({"status": "ok", "rows_affected": 1}))
+
+            saver = GdbCheckpointSaver(client)
+            cfg1 = saver.put(
+                {"configurable": {"thread_id": "thread-42"}},
+                {"id": "step-1", "messages": ["hello"]},
+                metadata={"step": 1},
+            )
+            self.assertEqual(cfg1["configurable"]["checkpoint_id"], "step-1")
+
+            cfg2 = saver.put(
+                cfg1,
+                {"id": "step-2", "messages": ["hello", "world"]},
+                metadata={"step": 2},
+            )
+            self.assertEqual(cfg2["configurable"]["checkpoint_id"], "step-2")
+
+            latest = saver.get(cfg2)
+            self.assertEqual(latest["id"], "step-2")
+            history = list(saver.list({"configurable": {"thread_id": "thread-42"}}))
+            self.assertEqual(len(history), 2)
+            self.assertEqual(history[0].checkpoint["id"], "step-2")
+            self.assertEqual(history[1].checkpoint["id"], "step-1")
 
 
 if __name__ == "__main__":

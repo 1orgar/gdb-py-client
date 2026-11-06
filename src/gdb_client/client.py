@@ -162,6 +162,7 @@ class GdbClient:
         auth_token: Optional[str] = None,
         client_flight_port: int = 8860,
         timeout: float = 30.0,
+        graph: str = "default",
     ):
         target = seed_url if seed_url is not None else endpoint
         self.endpoint = target.rstrip("/")
@@ -169,6 +170,7 @@ class GdbClient:
         self.auth_token = auth_token
         self.client_flight_port = client_flight_port
         self.timeout = timeout
+        self.graph = graph or "default"
         self.session = requests.Session() if requests is not None else None
         if self.auth_token and self.session is not None:
             self.session.headers.update({"Authorization": f"Bearer {self.auth_token}"})
@@ -289,7 +291,7 @@ class GdbClient:
                 clean_df = clean_df.rename({id_col: "id"})
             arrow_table = clean_df.to_arrow()
 
-            descriptor_cmd = json.dumps({"type": "vertex", "label": label})
+            descriptor_cmd = json.dumps({"type": "vertex", "label": label, "graph": self.graph})
             descriptor = flight.FlightDescriptor.for_command(descriptor_cmd.encode("utf-8"))
 
             for rep_idx in replica_indices:
@@ -396,7 +398,7 @@ class GdbClient:
                 clean_df = clean_df.rename(rename_map)
             arrow_table = clean_df.to_arrow()
 
-            descriptor_cmd = json.dumps({"type": "edge", "edge_type": edge_type})
+            descriptor_cmd = json.dumps({"type": "edge", "edge_type": edge_type, "graph": self.graph})
             descriptor = flight.FlightDescriptor.for_command(descriptor_cmd.encode("utf-8"))
 
             for rep_idx in replica_indices:
@@ -459,7 +461,12 @@ class GdbClient:
 
             if target_client is not None:
                 try:
-                    ticket = flight.Ticket(cypher.encode("utf-8"))
+                    ticket_str = (
+                        f"gdb://{self.graph}/{cypher}"
+                        if self.graph and self.graph != "default"
+                        else cypher
+                    )
+                    ticket = flight.Ticket(ticket_str.encode("utf-8"))
                     reader = target_client.do_get(ticket)
                     table = reader.read_all()
                     result = QueryResult(
@@ -475,14 +482,15 @@ class GdbClient:
                     pass
 
         target_url = f"{self.endpoint}/query"
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "X-GDB-Graph": self.graph}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
+        payload = {"query": cypher, "graph": self.graph}
         if self.session is not None:
             resp = self.session.post(
                 target_url,
-                json={"query": cypher},
+                json=payload,
                 headers=headers,
                 timeout=self.timeout,
             )
@@ -492,11 +500,14 @@ class GdbClient:
             import urllib.request
             req = urllib.request.Request(
                 target_url,
-                data=json.dumps({"query": cypher}).encode("utf-8"),
+                data=json.dumps(payload).encode("utf-8"),
                 headers=headers,
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+
+        if isinstance(data, dict) and data.get("active_graph"):
+            self.graph = data["active_graph"]
 
         res = QueryResult(data)
         if not res.is_ok:
@@ -628,8 +639,8 @@ class GdbClient:
 
     def compact(self) -> Dict[str, Any]:
         """Trigger asynchronous background CSR compaction across the cluster."""
-        target_url = f"{self.endpoint}/compact"
-        headers = {}
+        target_url = f"{self.endpoint}/compact?graph={self.graph}"
+        headers = {"X-GDB-Graph": self.graph}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
@@ -650,6 +661,60 @@ class GdbClient:
     def analyze(self) -> QueryResult:
         """Compute cardinality and degree statistics for Cost-Based Optimizer (CBO)."""
         return self.query("ANALYZE GRAPH;")
+
+    def list_graphs(self) -> List[Dict[str, Any]]:
+        """List all Graph Spaces (Multi-Tenancy Namespaces) and their statistics."""
+        target_url = f"{self.endpoint}/graphs"
+        headers = {"X-GDB-Graph": self.graph}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        if self.session is not None:
+            resp = self.session.get(target_url, headers=headers, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        else:
+            import urllib.request
+            req = urllib.request.Request(target_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        return data.get("graphs", [])
+
+    def create_graph(self, name: str, if_not_exists: bool = True) -> QueryResult:
+        """Create a new isolated Graph Space (Namespace)."""
+        clause = "IF NOT EXISTS " if if_not_exists else ""
+        return self.query(f"CREATE GRAPH {clause}{name};")
+
+    def use_graph(self, name: str) -> str:
+        """Switch the active Graph Space for this client session."""
+        self.graph = name
+        self.query(f"USE GRAPH {name};")
+        return self.graph
+
+    def drop_graph(self, name: str, if_exists: bool = True) -> QueryResult:
+        """Drop a Graph Space and all of its isolated storage & schema."""
+        clause = "IF EXISTS " if if_exists else ""
+        res = self.query(f"DROP GRAPH {clause}{name};")
+        if self.graph == name:
+            self.graph = "default"
+        return res
+
+    def pregel_status(self) -> Dict[str, Any]:
+        """Get Distributed Pregel / BSP Superstep execution telemetry."""
+        target_url = f"{self.endpoint}/pregel/status"
+        headers = {"X-GDB-Graph": self.graph}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        if self.session is not None:
+            resp = self.session.get(target_url, headers=headers, timeout=self.timeout)
+            resp.raise_for_status()
+            return resp.json()
+        else:
+            import urllib.request
+            req = urllib.request.Request(target_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
 
     def health(self) -> Dict[str, Any]:
         """Get node and cluster health."""
@@ -686,9 +751,9 @@ class GdbClient:
                 return json.loads(resp.read().decode("utf-8"))
 
     def schema(self) -> Dict[str, Any]:
-        """Get registered vertex labels, edge types, and properties."""
-        target_url = f"{self.endpoint}/schema"
-        headers = {}
+        """Get registered vertex labels, edge types, and properties for the active Graph Space."""
+        target_url = f"{self.endpoint}/schema?graph={self.graph}"
+        headers = {"X-GDB-Graph": self.graph}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
@@ -704,8 +769,8 @@ class GdbClient:
 
     def resources(self) -> Dict[str, Any]:
         """Get live memory, CSR edge count, and Delta MemTable statistics."""
-        target_url = f"{self.endpoint}/resources"
-        headers = {}
+        target_url = f"{self.endpoint}/resources?graph={self.graph}"
+        headers = {"X-GDB-Graph": self.graph}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
